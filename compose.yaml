@@ -1,0 +1,24 @@
+# Swiss Music Box: the transport database, published by the data group.
+#
+#   docker login ghcr.io          (once; a GitHub token with read:packages)
+#   docker compose up -d          start it (from this folder); the first start restores the data
+#   docker compose down -v        before changing the image tag, or the old data stays
+#
+# Connect: localhost:5433, database transport, schema transport.
+#   backend (read-only): backend_reader / dev
+#   admin:               postgres / dev
+# The image is built and published by the data group: see docs/data-group-guide.md in the
+# swiss-music-box repo (https://github.com/VitorBertoldi/swiss-music-box).
+services:
+  transport-db:
+    image: ghcr.io/vitorbertoldi/smb-data:2026-10-21-v1
+    environment:
+      POSTGRES_DB: transport
+      POSTGRES_PASSWORD: dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - transport-data:/var/lib/postgresql/data
+
+volumes:
+  transport-data:
