@@ -87,22 +87,6 @@ class TripTest {
 	}
 
 	@Test
-	void departsNeitherFromItsLastStopNorFromAPassedStation() {
-		assertThat(TestTrips.ic712().departures())
-				.extracting(Departure::station)
-				.containsExactly(ZURICH_HB);
-	}
-
-	@Test
-	void keepsCancelledDeparturesOnTheBoardMarked() {
-		Departure aarau = TestTrips.withCancelledStopAtAarau().departures().get(1);
-
-		assertThat(aarau.station()).isEqualTo(AARAU);
-		assertThat(aarau.cancelled()).isTrue();
-		assertThat(aarau.destination()).isEqualTo(BERN);
-	}
-
-	@Test
 	void buildsEachTimelineOnce() {
 		Trip ic712 = TestTrips.ic712();
 

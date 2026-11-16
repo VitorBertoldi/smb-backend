@@ -23,10 +23,6 @@ record ReferenceData(
 		segments = Map.copyOf(segments);
 	}
 
-	Optional<Station> findStation(StationId id) {
-		return Optional.ofNullable(stations.get(id));
-	}
-
 	Optional<PathSegment> findSegment(int id) {
 		return Optional.ofNullable(segments.get(id));
 	}
@@ -45,10 +41,6 @@ record ReferenceData(
 
 	Collection<Station> allStations() {
 		return stations.values();
-	}
-
-	Collection<Line> allLines() {
-		return lines.values();
 	}
 
 	private static <T> T required(T value, String kind, Object id) {

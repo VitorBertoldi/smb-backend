@@ -4,7 +4,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 /** A service date the database has no trips for; carries the dates it does have. */
-public class UnknownServiceDateException extends NotFoundException {
+public class UnknownServiceDateException extends RuntimeException {
 
 	private final List<LocalDate> availableDates;
 

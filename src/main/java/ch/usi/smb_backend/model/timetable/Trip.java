@@ -100,14 +100,6 @@ public final class Trip {
 		return timelines.computeIfAbsent(basis, chosen -> TripTimeline.of(this, chosen));
 	}
 
-	/** Every departure of the trip, in order. */
-	public List<Departure> departures() {
-		return stopEvents.stream()
-				.filter(Departure::isDeparture)
-				.map(event -> new Departure(this, event))
-				.toList();
-	}
-
 	private void requireValidStopEvents() {
 		if (stopEvents.size() < MINIMUM_STOP_EVENTS) {
 			throw invalid("needs at least " + MINIMUM_STOP_EVENTS + " stop events, has " + stopEvents.size());

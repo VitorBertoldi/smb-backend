@@ -1,203 +1,202 @@
 # Swiss Music Box: Backend Implementation Plan
 
-For the domain group. The order in which we build what `docs/domain-model.md` describes, on top of
-the data group's Istdaten gold tables. Each phase ends with a **gate**: a check that must pass
-before the next phase starts.
+For the domain group. Rewritten on 16 Nov 2026.
 
-The phases follow one idea: **build from the inside out**. The domain is written and tested with
-hand-made objects first, so we never wait for the database. The database arrives in phase 4, and
-the frontend gets endpoints in phase 5.
+## The idea: one small working version, then one feature at a time
 
-| Phase | Builds | Needs from the data group | Gate | Status (15 Nov 2026) |
-|---|---|---|---|---|
-| 0 Setup | Project structure, tests, CI | Answers to the open questions (domain model, section 13) | `./mvnw verify` green; questions settled | Code done; GitHub repo and answers to do |
-| 1 Values | `geo`, `time` | — | Unit tests for time, daylight saving, delays | Done |
-| 2 Trips | `network`, `timetable` | — | IC 712 fixture timelines correct on both bases | Done |
-| 3 Vehicles | `vehicle` | — | Position table of the fixture passes | Done |
-| 4 Repositories | `repository` | Gold image with one day | One full day loads; counts match the data group's | Code done, tested on a copy of the schema; gate waits for the gold image |
-| 5 API | `service`, `controller` | — | Frontend shows moving vehicles from `/movements` | Code done, tested end to end; gate waits for the frontend |
-| 6 Real paths | Nothing new: checks only | `path_segments` phase 2 (OSM geometry, `has_tunnel`) | Vehicles follow tracks; `estimated` mostly false | Waiting for the data |
-| 7 Later | Performance, show clock, more days | More service dates | Agreed when we get there | |
+The first build (commit `2500c8f`) did everything at once: 11 endpoints, before any of them was
+used. This plan starts again from the smallest thing that is useful, and grows it in steps.
 
-To try the API by hand before the gold image exists: `./mvnw spring-boot:test-run` starts the
-backend on a throw-away PostgreSQL with the sample rows (`TestSmbBackendApplication`); open
-http://localhost:8080/swagger-ui.html. The data is gone when it stops.
+- **Version 1 does one thing: vehicles move on the map.** Nothing else.
+- **Each later version adds one feature the user can see** (click a train, a departure board, …).
+  It brings exactly the endpoint, service and model code that feature needs, with tests.
+- **A version is done when the frontend uses it**, not when the backend compiles. We don't build
+  the next one before that.
 
-`./mvnw verify` runs 127 tests (Docker must be running): unit tests for the model, in-memory
-tests for the services, and integration tests against PostgreSQL for the repositories and the
-whole API.
+The code already written is not lost: it is kept on the tag `full-api-draft` (step 1.1) and
+brought back piece by piece, each time reviewed and understood by the group.
+
+| Version | The user can… | Endpoints added | Status |
+|---|---|---|---|
+| **Foundations** | – | – | Done |
+| **1 Moving vehicles** | watch every vehicle of one day move on the map | `/days`, `/stations`, `/movements`, `/paths` | Code done (16 Nov); waiting for the frontend and the gold image |
+| 2 Plan vs reality | switch between the timetable and what really happened; show only some vehicle kinds | `basis`, `type` parameters | |
+| 3 Click a train | click a vehicle and see its trip: line, stops, times, delays | `/trips/{date}/{tripId}` | |
+| 4 Departure board | click a station and see its departures, cancelled ones included | `/stations/{id}/departures` | |
+| 5 Delay map | colour stations by the day's delays | `/stations/stats` | |
+| 6 Real tracks | see vehicles follow the real tracks, not straight lines | nothing new (data group's paths, phase 2) | Waiting for the data |
+| Later | spectator mode, music, more days, performance | decided when we get there | |
+
+Not planned: `/stations?name=`, `/lines?name=`, `/vehicles`, `/trips/{…}/position`. Version 1
+already gives the frontend all stations, so a search box can filter them itself, and the
+frontend computes positions itself. Each comes back only if a feature needs it ("Later" below).
 
 ---
 
-## Phase 0: Setup
+## Foundations (done)
 
-**Goal:** an empty but correctly shaped project, and a settled contract.
+What every version stands on. Built and tested in the first commit; nothing to do here except
+keep it green.
 
-| Item | Where | Status |
+| Part | What it is | Where |
 |---|---|---|
-| Spring Boot 4.1.2, Java 21, Maven | `pom.xml` | Done |
-| **JPA** (Spring Data JPA, Hibernate 7.4) instead of plain JDBC | `spring-boot-starter-data-jpa` | Done |
-| Read-only connection; Hibernate checks entities against the gold schema and never changes it | `application.properties`: `hikari.read-only`, `ddl-auto=validate`, schema `transport`, `open-in-view=false` | Done |
-| Packages `controller`, `service`, `repository`, `model` (7 sub-packages), each with a `package-info.java` saying what belongs there | `src/main/java/ch/usi/smb_backend` | Done |
-| Tests: JUnit 6 (Jupiter) and AssertJ, from the Spring test starters | `pom.xml` | Done |
-| **ArchUnit** rules: `model` uses no Spring, JPA, Hibernate, JDBC or Jackson; layers depend inwards; `model` packages depend downwards | `ArchitectureTest` | Done, checked with a deliberate violation |
-| **Testcontainers** 2.0: a PostgreSQL 17 for tests that start Spring | `TestcontainersConfiguration` | Done |
-| CI running `./mvnw -B verify` on every push | `.github/workflows/ci.yml` | Written; runs once the repo is on GitHub |
-| GitHub repository for `smb-backend` | | To do |
-| Answers to the open questions (domain model, section 13) | Data group | To do |
+| Project | Spring Boot 4.1.2, Java 21, Maven; packages `controller`, `service`, `repository`, `model` | `pom.xml`, `src/main/java/ch/usi/smb_backend` |
+| Architecture rules | `model` uses no framework; layers depend inwards | `ArchitectureTest` |
+| Model: values | `geo` (`GeoPoint`, `Polyline`), `time` (`ServiceDay`, `ServiceTime`, `EventTime`, …) | `model/geo`, `model/time` |
+| Model: network and trips | `Station`, `Line`, `PathSegment`; `Trip` → `TripTimeline` → `Stop` / `Leg` | `model/network`, `model/timetable` |
+| Model: vehicles | `Vehicle` and its kinds, `VehicleFactory`, `MotionProfile`, `Movement` | `model/vehicle` |
+| Database access | JPA entities (read-only), mappers to the model, the `model.port` interfaces | `repository` |
+| Test database | PostgreSQL in Docker with our copy of the gold schema and 3 sample trips | `TestcontainersConfiguration`, `src/test/resources/db` |
+| Run by hand | `./mvnw spring-boot:test-run`, then http://localhost:8080/swagger-ui.html | `TestSmbBackendApplication` |
+| CI | `./mvnw -B verify` on every push | `.github/workflows/ci.yml` (runs once the repo is on GitHub) |
 
-How JPA is used, so the domain stays plain Java:
+How the layers work together is in `docs/domain-model.md`; **how a vehicle moves on the map**, from
+the data group's rows to the frontend's frame, is its section 7.
 
-- **JPA entities are not model classes.** Entities (`TripEntity`, `StopEventEntity`, …) live
-  in `repository`, marked `@Immutable`. A mapper turns them into model objects, whose
-  constructors check the rules.
-- **The model's repository interfaces stay** (`model.port`). `JpaTripRepository implements TripRepository`
-  uses a Spring Data repository inside; Spring Data never leaks out of `repository`.
-- **No N+1 queries.** Trips that are needed with their stop events are fetched in one query
-  (`JOIN FETCH` or an entity graph), in `@Transactional(readOnly = true)` methods.
-- **JDBC stays possible.** The JPA starter includes JDBC, so a query too slow through Hibernate
-  (most likely `/movements`, phase 7) can use `JdbcClient` without changing anything else.
+---
 
-`./mvnw verify` needs Docker running, for the Spring context test.
+## Version 1: Moving vehicles
 
-**Gate:** `./mvnw verify` passes (it does on 15 Nov 2026); the repo is on GitHub with CI green;
-section 13 has an answer for every row.
+**The user can:** open the app, and watch every train, tram, bus, boat and cable car of one day
+move across Switzerland, as it really ran (actual times).
 
-## Phase 1: Value objects (`geo`, `time`)
+### The contract: four endpoints
 
-**Goal:** the small building blocks every other class uses, fully tested.
+| Endpoint | Gives | The frontend calls it |
+|---|---|---|
+| `GET /api/v1/days` | the dates in the database: `{"dates":["2026-10-21"]}` | once, at start |
+| `GET /api/v1/stations` | **all** stations: id, name, location (longitude, latitude, height) | once, at start; cached |
+| `GET /api/v1/movements?date&from&to` | each leg moving in the window: trip, vehicle type, from/to station ids, path ids, departure and arrival seconds, motion curve | once per window (at most 3 h; e.g. every 30 playback minutes) |
+| `GET /api/v1/paths?ids=1,2` | the coordinates of those paths | for path ids it doesn't have yet; cached |
 
-| Class | Key tests |
+How the frontend uses them, every frame, with no request:
+
+1. For each movement with `departS < now < arriveS`: share of time →
+   motion curve (`LINEAR` or `SMOOTH`) → share of distance → point along the joined paths
+   (or along the straight line between the two stations when `pathIds` is empty).
+2. Between two movements of the same trip, the vehicle stands at the arrival station of the
+   first one (coordinates from the cached stations).
+
+Why each one is needed:
+
+- **`/days`**: without it the frontend must hard-code a date, which breaks when the data group
+  loads another day.
+- **`/stations`**: vehicles waiting at a station, and legs without a path, need station
+  coordinates. Movements carry only station ids (with names), so the coordinates must come from
+  somewhere once.
+- **`/movements`**: says what moves, when, and along which paths.
+- **`/paths`**: says where those paths go. It's separate from movements because one path is
+  used by hundreds of trips a day; it is sent once and cached.
+
+### What version 1 kept from the first draft, and what it parked
+
+| Layer | In version 1 | Parked on `full-api-draft` until its version |
+|---|---|---|
+| `controller` | `ServiceDayController` (`/days`), `StationController` (`/stations`, all), `MovementController` (`/movements`, was `VehicleController`), `PathController`, `ApiPaths`, `RequestParameters`, `ApiExceptionHandler`, `BadRequestException` | `WebConfiguration` and `CaseInsensitiveEnumConverterFactory` (2, for `basis=actual`), `TripController` (3), departures (4), stats (5), `/vehicles` (later); `LineController` and the name searches (dropped) |
+| `controller/dto` | `ServiceDaysDto`, `StationDto` (id, name, location), `StationRefDto`, `MovementDto`, `TripRefDto`, `PathDto`, `LocationDto` | `TripDto`, `StopEventDto`, `EventTimeDto` (3), `DepartureDto` (4), `StationStatsDto` (5), `VehiclePositionDto` (later), `LineDto` |
+| `service` | `ServiceDayService`, `NetworkService` (stations, paths), `VehicleTrackingService.movementsBetween` (actual times), `ModelConfiguration`, `UnknownServiceDateException` | `TripService` and `NotFoundException` (3), `DepartureBoardService` (4), `StationStatsService` (5), `positionsAt` (later) |
+| `model` | `geo`, `time`, `network`, `timetable`, `vehicle` without positions; `port`: `StationRepository.findAll`, `PathSegmentRepository`, `TripRepository` (`serviceDates`, `findCandidatesRunningBetween`) | `findByKey` (3); `Departure`, `findCandidatesDepartingBetween` (4); `statistics`, `StationStatsRepository` (5); `VehiclePosition`, `VehicleStatus`, `Vehicle.positionAt` (later); `LineRepository` |
+| `repository` | entities for `stations`, `lines`, `path_segments`, `trips`, `stop_events`; `ReferenceDataCache`, the mappers; `JpaStationRepository`, `JpaPathSegmentRepository`, `JpaTripRepository` | `StationDayStatsEntity` and `JpaStationStatsRepository` (5), `JpaLineRepository` |
+
+The model packages `time`, `network` and `timetable` stay whole even where version 1 doesn't
+use every field (platforms, delays, levels): they describe the data group's tables, and later
+versions read them.
+
+### Steps
+
+| # | Step | Done when |
+|---|---|---|
+| 1.1 | Tag the current code: `git tag full-api-draft` | Done |
+| 1.2 | Remove the parked code from `main` (table above), with its tests | Done: 106 tests green, `ArchitectureTest` included |
+| 1.3 | Add `GET /stations` returning every station, from the cache that already holds them | Done: `JpaRepositoriesIntegrationTest` and `ApiIntegrationTest` cases |
+| 1.4 | Turn on response compression (`server.compression.enabled=true`): the station list and paths are the largest responses | Done: `curl --compressed` shows `Content-Encoding: gzip` |
+| 1.5 | Make `/movements` use actual times only (drop `basis` and `type` for now) | Done; `ApiIntegrationTest` checks that OpenAPI lists exactly the four endpoints |
+| 1.6 | Update `docs/domain-model.md` section 11 to the four endpoints | Done; later classes and endpoints are marked with their version |
+| 1.7 | Put the repo on GitHub; share the OpenAPI link with the frontend group | CI green |
+| 1.8 | Data: point `compose.yaml` at the data group's first gold image; replace `gold-schema.sql` with their `schema.sql` | The app starts against it (`ddl-auto=validate` passes); one full day loads without an invalid trip; trip counts by vehicle type match the data group's report |
+
+### Gate
+
+The frontend group shows one full day of vehicles moving, from these four endpoints only,
+first on the sample data (`spring-boot:test-run`) and then on the gold image. A sample of
+10 trips checked against their timetable: right place at the right time.
+
+---
+
+## Version 2: Plan vs reality, and vehicle kinds
+
+**The user can:** switch between "timetable" and "what really happened", and show only trains,
+only buses, etc.
+
+| Adds | Detail |
 |---|---|
-| `GeoPoint`, `Polyline` | Range checks; `pointAt` interpolates and clamps; length 0; `then` joins two lines |
-| `ServiceDay` | `parseClock("25:10")` and `formatClock` round-trip; 25 Oct 2026 (clocks go back) and 29 Mar 2026 (clocks go forward) |
-| `ServiceTime` | Comparison, `max`, `secondsUntil`, values over 86,400 |
-| `TimeStatus`, `EventTime` | `on(ACTUAL)` falls back to scheduled; `delay()` empty without an actual time; `isReliable` |
-| `Delay` | Sign; `isOnTime` at 2:59 and 3:00; text form |
+| `basis=actual\|scheduled` on `/movements` | The model already builds both timelines (`Trip.timeline(basis)`); this is only the parameter |
+| `type=TRAIN&type=BUS…` on `/movements` | Filter on the line's `VehicleType` |
+| Tests | A trip with a delay appears at different times on each basis; a cancelled trip moves only on `scheduled` |
 
-**Gate:** every class above has tests, and the tests run in under a second (no Spring context).
+**Gate:** the frontend has a plan/reality toggle and vehicle-kind checkboxes.
 
-## Phase 2: Network and trips (`network`, `timetable`)
+## Version 3: Click a train
 
-**Goal:** a `Trip` that is always valid, and the `TripTimeline` that interprets it.
+**The user can:** click a moving vehicle and see its trip: line and operator, every stop with
+planned and actual times, delays, platforms, stations passed without stopping.
 
-1. `StationId`, `Station`, `Level`, `Platform`, `Operator`, `Line`, `VehicleType`,
-   `NetworkType`, `PathSegment`.
-2. `TripKey`, `StopEvent` with its rules and `stopsOn(basis)`.
-3. `Trip` with its constructor rules, `existsOn`, `destination`, `displayName`.
-4. `Stop`, `Leg` (joining segments, 0-second legs, straight-line fallback).
-5. `TripTimeline`: the four building steps and the out-of-order rule (domain model, 7.1 and 7.2),
-   binary search for `stopAt` and `legAt`.
-6. `Departure`.
+| Adds | Detail |
+|---|---|
+| `GET /trips/{date}/{tripId}` | `TripController`, `TripService`, `TripDto`, `StopEventDto`, `EventTimeDto` (from the tag) |
+| Port | `TripRepository.findByKey` |
+| Tests | IC 712 in full; an unknown trip gives 404 |
 
-Fixtures live in one test helper (`TestTrips`), built by hand: IC 712 from the domain model,
-plus one trip each with a cancelled stop, a cancelled trip, an extra trip, out-of-order actual
-times, and a missing path.
+The trip id is already in every movement (`trip.id`), so the click needs nothing else.
 
-**Gate:** every row of the odd-cases table (domain model, 7.3) has a test that passes.
+**Gate:** clicking a vehicle opens its trip panel.
 
-## Phase 3: Vehicles (`vehicle`)
+## Version 4: Departure board
 
-**Goal:** positions, on both time bases.
+**The user can:** click a station and see the departures in a time window, cancelled trips
+included (they never move, so they are not in `/movements`).
 
-- `MotionProfile`, `Vehicle` with the Template Method, the six subclasses, `VehicleFactory`.
-- `VehicleStatus`, `VehiclePosition` with its three factory methods.
+| Adds | Detail |
+|---|---|
+| `GET /stations/{id}/departures?date&from&to` | `DepartureBoardService`, `Departure`, `DepartureDto` |
+| Port | `TripRepository.findCandidatesDepartingBetween` |
+| Tests | Zürich HB: IC 712 at 09:32 (+70 s, platform 34), IC 2512 at 11:00 cancelled |
 
-**Gate:** the IC 712 position table (domain model, section 10) passes; the factory test covers
-every `VehicleType`.
+**Gate:** clicking a station opens its board.
 
-At the end of phase 3 the domain is complete and has never touched a database.
+## Version 5: Delay map
 
-## Phase 4: Repositories (`repository`)
+**The user can:** see stations coloured by the day's punctuality.
 
-**Goal:** real data in, domain objects out.
+| Adds | Detail |
+|---|---|
+| `GET /stations/stats?date` | `StationStatsService`, `StationDayStats`, `StationStatsRepository` and its JPA side, reading the data group's `station_day_stats` view |
+| To confirm with the data group | Is `pct_on_time` 0–100 or 0–1? Which delay counts as on time? |
 
-1. Point `compose.yaml` at the first gold image the data group publishes (the schema name is set
-   in `application.properties`).
-2. **Entities**, one per gold table, `@Immutable`, in `repository`:
-   - `StationEntity`, `LineEntity`, `PathSegmentEntity` (`points` as JSON with
-     `@JdbcTypeCode(SqlTypes.JSON)`).
-   - `TripEntity` with an `@EmbeddedId` (`service_date`, `trip_id`); `StopEventEntity` with an
-     `@EmbeddedId` (`service_date`, `trip_id`, `stop_sequence`); timestamps as `OffsetDateTime`.
-   - `StationDayStatsEntity` for the view.
-   Starting the app now checks every entity against the real schema (`ddl-auto=validate`): a
-   mismatch stops the start-up with the column name.
-3. **Mappers** from entities to model objects. Timestamps become `ServiceTime` through
-   `ServiceDay`, here only.
-4. **Repositories** implementing the `model.port` interfaces, each using a Spring Data repository:
-   - `JpaStationRepository`, `JpaLineRepository`, `JpaPathSegmentRepository`: load everything at
-     start-up into memory (`Map` by id).
-   - `JpaTripRepository`: `findByKey` (one trip with its stop events), `findRunningAt` (filter on
-     `first_departure`/`last_arrival` with a margin for delays, stop events fetched in the same
-     query, then the exact check in `TripTimeline`), `findDepartingFrom`, `serviceDates`.
-   - `JpaStationStatsRepository`.
-5. **Tests:** `JpaRepositoriesIntegrationTest` (`@DataJpaTest` with Testcontainers). The
-   container starts from `src/test/resources/db/gold-schema.sql`, our copy of the gold model
-   written from the data group's document, plus `gold-sample-data.sql` (IC 712, a cancelled and
-   an extra trip). **Replace `gold-schema.sql` with the data group's `schema.sql` as soon as it is
-   published.** One smoke test against the full image, run by hand (too big for CI).
+**Gate:** the frontend draws the layer for one day.
 
-Choices made where the gold document is silent (to confirm, domain model section 13):
+## Version 6: Real tracks
 
-- The status columns are a PostgreSQL enum with Istdaten's labels; they are read as text.
-- An actual time whose status is unknown is kept, as a `FORECAST`.
-- A path point without a height, or a station without an elevation, is placed at 0 m.
-- `pct_on_time` is a percentage (0–100); the model stores a share (0–1).
+**The user can:** see vehicles follow rails, roads and lake routes instead of straight lines.
 
-**Gate:** the app starts against the gold image (the schema check passes); the full day loads
-without a single invalid `Trip`. Any invalid trip found is reported to the data group, not fixed
-in Java. Counts of trips by vehicle type match the data group's validation report.
+Nothing to build: the data group's phase 2 fills `path_segments.points` with real geometry and
+sets `has_tunnel`. `Polyline` handles any number of points, and the API sends path ids, so the
+contract doesn't change.
 
-## Phase 5: Services and controllers (`service`, `controller`)
+- Update the image tag; run all tests.
+- Check on the map that `estimated` is false for most legs.
 
-**Goal:** the endpoints in the domain model, section 11.
+**Gate:** no domain code changed; 20 sample trips follow their tracks.
 
-Order, from the simplest to the one the frontend needs most:
+## Later (decide when we get there)
 
-1. `GET /days`, `/stations`, `/stations/{id}`, `/lines`, `/paths`.
-2. `GET /trips/{date}/{tripId}` and `/trips/{date}/{tripId}/position`.
-3. `GET /stations/{id}/departures`, `/stations/stats`.
-4. `GET /vehicles`.
-5. `GET /movements`: the main endpoint for the animation.
-
-Alongside:
-
-- Request parsing in one place: `date`, `time` (`ServiceDay.parseClock`), `basis`, `type`;
-  errors as in the domain model's error table, with `@ControllerAdvice`.
-- DTO records in `controller.dto`, so model classes are never serialised directly.
-- OpenAPI description (springdoc 3.2) at `/v3/api-docs`, so the frontend can generate its types;
-  Swagger UI at `/swagger-ui.html`.
-- Limits: a `/movements` window is at most 3 hours; station and line names must not be blank.
-- Tests: services against in-memory repositories (`InMemoryTripRepository`, …), and
-  `ApiIntegrationTest` for the whole stack, HTTP to PostgreSQL, including every error case.
-
-**Gate:** the frontend group shows a day of vehicles moving from `/movements` and `/paths`, and
-switches between `actual` and `scheduled`.
-
-## Phase 6: Real paths
-
-**Goal:** check that the domain needs no change when the data group delivers OSM geometry.
-
-The data group's phase 2 fills `path_segments.points` with real geometry and sets `has_tunnel`.
-The domain was written for this: `Polyline` handles any number of points, and `Leg.mayBeInTunnel`
-reads `hasTunnel`.
-
-- Update the image tag; run the phase 4 and 5 tests again.
-- Check on the map: vehicles follow tracks, `estimated` is false for most legs, and
-  `underground` reports `UNKNOWN` on legs with a tunnel.
-
-**Gate:** no domain code changed; a sample of 20 trips looks right on the map.
-
-## Phase 7: Later
-
-To plan when phase 6 is done:
-
-- Performance: response time of `/movements` for a 30-minute window at rush hour; caching of
-  trips per day, or moving that one query to `JdbcClient`, if needed.
-- The show clock (service time 04:00 → 28:00).
-- Pass-through times as extra timing points inside a leg, for more accurate positions.
-- More service dates; comparing days.
-- Music, when that group starts.
+| Idea | Would bring back or add |
+|---|---|
+| Spectator mode ("which vehicle is near me?") | `/vehicles` snapshot (`VehiclePosition`, from the tag) |
+| A server-side station search, if the station list gets too big for the browser | `/stations?name=` |
+| Performance: `/movements` at rush hour | caching trips per day, or that one query in plain SQL (`JdbcClient`) |
+| The show clock (service time 04:00 → 28:00), more days, comparing days | `ServiceDay` is ready for times past midnight |
+| Music | when that group starts |
 
 ---
 
@@ -205,9 +204,10 @@ To plan when phase 6 is done:
 
 | Rule | Why |
 |---|---|
-| Tests first for every domain rule | The rules are the product; they must be provable without a database |
+| One version at a time; the next starts after the frontend uses the last | We build only what is used, and understand all of it |
+| Every version adds tests for what it adds | The rules are the product; they must be provable without a database |
+| Bring code back from `full-api-draft` only when its version starts, and review it like new code | Nobody owns code they haven't read |
 | Domain classes immutable, records for values, rules in constructors | An invalid object can't exist |
-| Descriptive names from the vocabulary (domain model, section 3) | Code, tests and conversation use the same words |
-| No data fixes in Java | Report to the data group; interpreting measurements (7.2) is the only exception |
-| One pull request per class group, reviewed by another member | Shared code, shared understanding |
-| Contract changes only by agreement with the data group | The gold schema is the contract |
+| No data fixes in Java | Report to the data group; interpreting measurements is the only exception |
+| One pull request per step, reviewed by another member | Shared code, shared understanding |
+| Contract changes only by agreement: the gold schema with the data group, the API with the frontend group | Both are shared contracts |

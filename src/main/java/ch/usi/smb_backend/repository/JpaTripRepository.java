@@ -1,13 +1,10 @@
 package ch.usi.smb_backend.repository;
 
-import ch.usi.smb_backend.model.network.StationId;
 import ch.usi.smb_backend.model.port.TripRepository;
 import ch.usi.smb_backend.model.time.ServiceDay;
 import ch.usi.smb_backend.model.time.ServiceTime;
 import ch.usi.smb_backend.model.timetable.Trip;
-import ch.usi.smb_backend.model.timetable.TripKey;
 import ch.usi.smb_backend.repository.entity.TripEntity;
-import ch.usi.smb_backend.repository.entity.TripEntityId;
 import ch.usi.smb_backend.repository.entity.TripEntityRepository;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -53,24 +50,11 @@ class JpaTripRepository implements TripRepository {
 	}
 
 	@Override
-	public Optional<Trip> findByKey(TripKey key) {
-		return tripRows.findWithStopEvents(new TripEntityId(key.serviceDate(), key.tripId()))
-				.map(row -> TripMapper.toTrip(row, reference.get()));
-	}
-
-	@Override
 	public List<Trip> findCandidatesRunningBetween(ServiceDay day, ServiceTime from, ServiceTime to) {
 		List<TripEntity> rows = tripRows.findOverlapping(
 				day.date(),
 				timestamp(day, from).minus(DELAY_MARGIN),
 				timestamp(day, to).plus(DELAY_MARGIN));
-		return validTrips(rows);
-	}
-
-	@Override
-	public List<Trip> findCandidatesDepartingBetween(StationId station, ServiceDay day, ServiceTime from, ServiceTime to) {
-		List<TripEntity> rows = tripRows.findDepartingFrom(
-				station.code(), day.date(), timestamp(day, from), timestamp(day, to));
 		return validTrips(rows);
 	}
 

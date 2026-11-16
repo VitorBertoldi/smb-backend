@@ -1,12 +1,9 @@
 package ch.usi.smb_backend.repository;
 
 import ch.usi.smb_backend.model.network.Station;
-import ch.usi.smb_backend.model.network.StationId;
 import ch.usi.smb_backend.model.port.StationRepository;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 /** Stations, answered from the in-memory reference data. */
@@ -20,16 +17,9 @@ class JpaStationRepository implements StationRepository {
 	}
 
 	@Override
-	public Optional<Station> findById(StationId id) {
-		return reference.get().findStation(id);
-	}
-
-	@Override
-	public List<Station> findByName(String namePart) {
-		String wanted = namePart.toLowerCase(Locale.ROOT);
+	public List<Station> findAll() {
 		return reference.get().allStations().stream()
-				.filter(station -> station.name().toLowerCase(Locale.ROOT).contains(wanted))
-				.sorted(Comparator.comparing(Station::name))
+				.sorted(Comparator.comparing(station -> station.id().code()))
 				.toList();
 	}
 }

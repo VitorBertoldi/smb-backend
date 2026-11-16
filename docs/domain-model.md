@@ -4,6 +4,10 @@ For the domain group, which builds the whole backend. This document covers **wha
 responsible for**, **how it is modelled in classes**, and **which REST endpoints the backend
 exposes on top of it** (section 11). The order of work is in `docs/implementation-plan.md`.
 
+> **The model describes the whole design; the code is built in versions.** Version 1 (moving
+> vehicles) is implemented. Classes and endpoints marked *(version N)* or *(later)* are designed
+> here but not in `main` yet; their first draft is on the git tag `full-api-draft`.
+
 Language: Java 21 (records, sealed classes, pattern-matching `switch`), Spring Boot 4, Maven.
 Data source: the **gold** tables of the data group's Istdaten pipeline ("Istdaten pipeline:
 Bronze and Gold", 11 Nov 2026). Start the database with `docker compose up -d` from the root of
@@ -70,10 +74,10 @@ tested with plain JUnit and fixed objects, without a database.
 
 | Layer | Package | Responsible for | Example |
 |---|---|---|---|
-| **Controller** | `controller` | HTTP: endpoints, parameters, JSON DTOs, error codes (section 11) | `VehicleController` for `GET /api/v1/vehicles` |
+| **Controller** | `controller` | HTTP: endpoints, parameters, JSON DTOs, error codes (section 11) | `MovementController` for `GET /api/v1/movements` |
 | **Service** | `service` | Use cases: combining repositories and model objects for one request | `VehicleTrackingService` |
 | **Repository** | `repository` | JPA entities and Spring Data repositories, mapping them to model objects, keeping reference data in memory | `JpaTripRepository` |
-| **Model** | `model` | The domain rules: what the facts mean at a given moment (2.2) | `Trip.timeline`, `Vehicle.positionAt` |
+| **Model** | `model` | The domain rules: what the facts mean at a given moment (2.2) | `Trip.timeline`, `Vehicle.movementsBetween` |
 
 The layers depend inwards: controller → service → model ← repository. The repository
 *interfaces* belong to the model (`model.port`); their JPA *implementations* belong to
@@ -274,12 +278,14 @@ ch.usi.smb_backend.model
 ├── time        ServiceDay, ServiceTime, EventTime, TimeStatus, TimeBasis, Delay
 ├── network     StationId, Station, Level, Platform, Line, Operator, VehicleType,
 │               NetworkType, PathSegment
-├── timetable   TripKey, Trip, StopEvent, TripTimeline, Stop, Leg, Departure
+├── timetable   TripKey, Trip, StopEvent, TripTimeline, Stop, Leg
+│               Departure (version 4)
 ├── vehicle     Vehicle, Train, Tram, Bus, Boat, Funicular, CableCar,
-│               VehicleFactory, VehiclePosition, VehicleStatus, MotionProfile, Movement
-├── statistics  StationDayStats
-└── port        StationRepository, LineRepository, PathSegmentRepository,
-                TripRepository, StationStatsRepository           (interfaces only)
+│               VehicleFactory, MotionProfile, Movement
+│               VehiclePosition, VehicleStatus (later)
+├── statistics  StationDayStats (version 5)
+└── port        StationRepository, PathSegmentRepository, TripRepository (interfaces only)
+                StationStatsRepository (version 5)
 ```
 
 Packages depend downwards only: `vehicle` → `timetable` → `network` → `geo`, `time`.
@@ -567,7 +573,7 @@ The trip as it runs on one `TimeBasis`. Answers every "when and where" question.
 
 Stops and legs are sorted by time, so lookups use binary search.
 
-#### `Departure` (VO, record)
+#### `Departure` (VO, record) *(version 4)*
 
 One line on a departure board: a `trip` and one of its stop `event`s. It answers `station()`,
 `platform()`, `destination()`, `time()` (the `EventTime`, so the board shows planned time, actual
@@ -580,6 +586,9 @@ Cancelled departures stay on the board, marked, as on a real one.
 #### `Vehicle` (abstract, sealed)
 
 A trip in motion. It holds a `Trip` and knows how that kind of vehicle moves.
+
+In version 1 the code has `motionProfile()` and `movementsBetween(...)`; `positionAt` below
+(a Template Method) comes back with `/vehicles` *(later)*.
 
 ```java
 public abstract sealed class Vehicle
@@ -680,7 +689,7 @@ public final class VehicleFactory {
 One leg a vehicle moves on, with its `motionProfile()`: what `/movements` sends so the frontend
 can animate the leg itself. `Vehicle.movementsBetween(start, end, basis)` lists them.
 
-#### `VehicleStatus` (enum)
+#### `VehicleStatus` (enum) *(later)*
 
 | Value | Meaning |
 |---|---|
@@ -688,7 +697,7 @@ can animate the leg itself. `Vehicle.movementsBetween(start, end, basis)` lists 
 | `AT_STATION` | Between arriving at and leaving a stop |
 | `MOVING` | On a leg between two stops |
 
-#### `VehiclePosition` (VO, record)
+#### `VehiclePosition` (VO, record) *(later)*
 
 Built only through its three factory methods, so it's always consistent.
 
@@ -706,7 +715,7 @@ Built only through its three factory methods, so it's always consistent.
 
 `Optional` for every field that can be empty, never `null`.
 
-### 6.6 `statistics`
+### 6.6 `statistics` *(version 5)*
 
 #### `StationDayStats` (VO, record)
 
@@ -761,24 +770,120 @@ that breaks a model rule is skipped and logged, never fixed.
 
 ---
 
-## 7. How a position is calculated
+## 7. How a vehicle moves on the map
+
+The whole path from the data group's rows to a dot moving on the screen, with one real example:
+**IC 712 from Zürich HB to Bern on 21 Oct 2026** (the sample rows in
+`src/test/resources/db/gold-sample-data.sql`).
+
+**The principle.** The backend never streams positions. It describes each journey once: *this
+vehicle leaves A at time t1, arrives at B at time t2, along these paths, with this speed
+curve*. The frontend owns the clock and computes the position itself, 60 times a second, with
+no request.
+
+### Step 1: the data (data group)
+
+Coordinates are stored in exactly two tables. Everything else points to them by **id**:
 
 ```
-positionAt(now, basis)
-  │
-  ├─ timeline = trip.timeline(basis)              (stops made, legs between them)
-  │
-  ├─ trip doesn't exist on this basis,
-  │  or now outside first departure..last arrival? ──► NOT_RUNNING
-  │
-  ├─ at a stop (arrival ≤ now ≤ departure)? ────────► AT_STATION (the last matching stop)
-  │
-  └─ otherwise on a leg (departure < now < arrival)
-        1. timeFraction = time passed / leg duration    (1 if the duration is 0)
-        2. distance     = motionProfile().apply(...)    (subclass decides the curve)
-        3. point        = leg.pointAt(distance)         (segments joined; straight line if none)
-        ──► MOVING
+stations                                        path_segments
+station_id │ name      │ lon    │ lat            segment_id │ from    │ to      │ points
+───────────┼───────────┼────────┼───────         ───────────┼─────────┼─────────┼──────────────────────────
+8503000    │ Zürich HB │ 8.5402 │ 47.3782        1          │ 8503000 │ 8502113 │ [[8.5402,47.3782],[8.051,47.3913]]
+8502113    │ Aarau     │ 8.0510 │ 47.3913        2          │ 8502113 │ 8507000 │ [[8.051,47.3913],[7.4391,46.949]]
+8507000    │ Bern      │ 7.4391 │ 46.9490
+
+stop_events of trip 85:11:712:001 (no coordinates, only ids and times)
+seq │ station_id │ planned        │ actual            │ status   │ pass_through │ next_segment_id
+────┼────────────┼────────────────┼───────────────────┼──────────┼──────────────┼────────────────
+1   │ 8503000    │ dep 09:32:00   │ dep 09:33:10      │ REAL     │ no           │ 1
+2   │ 8502113    │ 10:00 / 10:00  │ 10:01 / 10:01     │ REAL     │ YES          │ 2
+3   │ 8507000    │ arr 10:28:00   │ arr 10:30:40      │ PROGNOSE │ no           │ –
 ```
+
+- An **id** is a table's primary key: `8503000` is Zürich HB (the official station number),
+  `1` is the path Zürich → Aarau.
+- A **geolocation** is a coordinate: `(8.5402, 47.3782)`. It lives only in `stations` and in
+  `path_segments.points`.
+
+### Step 2: the backend turns rows into movements (domain group)
+
+When the frontend asks `GET /movements?date=2026-10-21&from=09:30&to=10:30`:
+
+| # | What happens | Where |
+|---|---|---|
+| 1 | Load the trips that may run in the window (widened by 1 h for delays), with their stop events, in one query | `JpaTripRepository.findCandidatesRunningBetween` |
+| 2 | Replace ids with objects: `8503000` → `Station("Zürich HB", 8.5402, 47.3782)`, `1` → `PathSegment(1, Zürich → Aarau, line)`. Stations and paths are loaded once and kept in memory | `TripMapper`, `ReferenceDataCache` |
+| 3 | Build the timeline on actual times: keep the stops the vehicle really makes (Aarau is a pass-through, so it is skipped), and make one **leg** between each pair of kept stops, collecting the path segments of every hop in between (7.1) | `Trip.timeline`, `TripTimeline`, `Leg` |
+| 4 | Pick the vehicle kind from the line (`TRAIN` → `Train`), which gives the speed curve | `VehicleFactory`, `Vehicle.motionProfile` |
+| 5 | Keep the legs moving at some moment inside the window | `Vehicle.movementsBetween` |
+| 6 | Turn each leg back into ids and seconds, as JSON | `MovementDto` |
+
+For IC 712 this gives one timeline and one movement:
+
+```
+[Stop]  Zürich HB   leaves 09:33:10
+[Leg]   Zürich HB → Bern, paths 1 then 2, 09:33:10 → 10:30:40     ← Aarau passed without stopping
+[Stop]  Bern        arrives 10:30:40
+```
+```json
+{ "trip": { "date": "2026-10-21", "id": "85:11:712:001" },
+  "displayName": "IC 712", "vehicleType": "TRAIN",
+  "fromStation": { "id": "8503000", "name": "Zürich HB" },
+  "toStation":   { "id": "8507000", "name": "Bern" },
+  "pathIds": [1, 2],
+  "departS": 34390, "arriveS": 37840,
+  "motion": "SMOOTH", "delayS": 70, "estimated": true }
+```
+
+`departS` and `arriveS` are seconds since the start of the service day:
+09:33:10 = 9 × 3600 + 33 × 60 + 10 = 34390. The movement holds **no coordinates**.
+
+### Step 3: the frontend draws it (frontend group)
+
+| When | Request | Kept |
+|---|---|---|
+| At start | `GET /days`, then `GET /stations` | every station's location, by id |
+| Every window (e.g. 30 playback minutes, at most 3 h) | `GET /movements?date&from&to` | the movements of the window |
+| For path ids not seen yet | `GET /paths?ids=1,2` | each path's coordinates, by id, for the whole session |
+
+Then on **every frame**, with no request. Example: the playback clock reads 09:50:00 = 35400 s.
+
+```
+for each movement m:
+  1. moving?            departS < now < arriveS          34390 < 35400 < 37840 → yes
+  2. share of time      t = (now − departS) / (arriveS − departS)
+                          = 1010 / 3450 = 0.293
+  3. share of distance  d = t                (LINEAR)
+                          = t² × (3 − 2t)    (SMOOTH: slow start, slow end)
+                          = 0.207
+  4. the route          paths[1] then paths[2], joined in order
+                        (pathIds empty → straight line from fromStation to toStation)
+  5. the point          d × route length along the route → lon 8.2535, lat 47.3859
+                        (between Zürich and Aarau)
+  6. draw the vehicle there
+```
+
+On the next frame the clock has moved a little, `t` grows a little, and the vehicle moves a
+little: that is the whole animation. **Between two movements of the same trip** (after
+`arriveS` of one, before `departS` of the next), the vehicle stands at the first one's
+`toStation`, using the location from the cached stations.
+
+The backend applies the same formulas in Java (`Leg.timeFraction`, `MotionProfile.apply`,
+`Leg.pointAt`), which is why the API sends the curve by name: both sides compute the same point.
+
+### Why ids, not coordinates, in movements
+
+| | Ids (what the API does) | Coordinates inside each movement |
+|---|---|---|
+| Movement | `"pathIds": [1, 2]` | `"route": [[8.54, 47.37], [8.05, 47.39], …]` |
+| Size | tiny | a real Zürich–Bern track is about 2,000 points, sent again for each of the ~50 trains a day on it |
+| The data group improves the geometry | `/paths` returns better lines; movements don't change | every movement changes |
+| Identity | two paths between the same stations (rail and road) stay distinct | only coordinates to compare |
+
+So: **data that changes all the time (movements) refers to places by id; geometry is sent once,
+by id, and cached.** Names travel with the ids (`{"id": "8503000", "name": "Zürich HB"}`) so the
+frontend can show labels without a lookup.
 
 ### 7.1 Building a timeline
 
@@ -809,15 +914,15 @@ Each case is handled in exactly one place. Sizes are to measure on the first gol
 |---|---|---|
 | Leg takes 0 s (scheduled times are whole minutes) | `Leg.timeFraction` | Returns 1; the vehicle is never "moving" on it |
 | First stop has no arrival, last has no departure | `StopEvent.arrivalOn` / `departureOn` | Use the other time |
-| No actual time (`UNKNOWN`) | `EventTime.on` | Scheduled time, `timeReliable = false` |
+| No actual time (`UNKNOWN`) | `EventTime.on` | Scheduled time is used |
 | Actual times out of order | `TripTimeline` (7.2) | Raised to the previous time |
 | Pass-through | `StopEvent.stopsOn` | Not a stop; its hop is part of a longer leg |
 | Cancelled stop | `StopEvent.stopsOn` | Passed without stopping on `ACTUAL`; a normal stop on `SCHEDULED` |
-| Cancelled trip | `Trip.existsOn` | `NOT_RUNNING` on `ACTUAL`; runs on `SCHEDULED` |
+| Cancelled trip | `Trip.existsOn` | No movements on `ACTUAL`; runs on `SCHEDULED` |
 | Extra trip | `Trip.existsOn` | Runs on `ACTUAL` only |
 | Several stops match one time | `TripTimeline.stopAt` | The last one wins |
 | No path for a hop | `Leg` | Straight line between the leg's stations, `estimated` |
-| Phase 1 straight-line segments | `PathSegment.estimated` | Position is `estimated` |
+| Phase 1 straight-line segments | `PathSegment.estimated` | The movement is `estimated` |
 | Times after 24:00 | `ServiceTime` | Kept; never wrapped |
 | Daylight-saving day | `ServiceDay` | Elapsed seconds; wall clock only for text |
 | Station with no OSM match | `Level.UNKNOWN` | Shown as unknown, not as surface |
@@ -872,14 +977,14 @@ tests; what matters is the rules they check.
 | 2 | Aarau | 10:00 / 10:00 | 10:01 / 10:01 (`MEASURED`) | pass-through |
 | 3 | Bern | 10:28 / — | 10:30:40 / — (`FORECAST`) | |
 
-| Time | Basis | Expected |
+| Question | Basis | Expected |
 |---|---|---|
-| 09:32:30 | `SCHEDULED` | `MOVING`, Zürich HB → Bern (Aarau is passed, so one leg) |
-| 09:32:30 | `ACTUAL` | `NOT_RUNNING`: it hasn't left yet, and a first stop has no arrival |
-| 09:33:10 | `ACTUAL` | `AT_STATION` Zürich HB, delay +1:10, `timeReliable` |
-| 10:00 | `SCHEDULED` | `MOVING`, time fraction 0.5; not stopped at Aarau |
-| 10:29 | `SCHEDULED` | `NOT_RUNNING` (arrived 10:28) |
-| 10:29 | `ACTUAL` | `MOVING`, last leg `timeReliable = false` (arrival is a forecast) |
+| Its legs | `SCHEDULED` | One leg, Zürich HB → Bern, 09:32 → 10:28, paths 1 then 2 (Aarau is passed, so it doesn't split the leg) |
+| Its legs | `ACTUAL` | The same leg, 09:33:10 → 10:30:40 |
+| Time fraction at 10:00 | `SCHEDULED` | 0.5 (28 of 56 minutes) |
+| Movements 09:00–11:00 | `ACTUAL` | IC 712 once: `departS` 34390, `arriveS` 37840, `pathIds` [1, 2], `SMOOTH` |
+| Movements 10:29–10:30 | `ACTUAL` | IC 712: planned to arrive at 10:28, still moving until 10:30:40 (a forecast) |
+| Movements 10:29–10:30 | `SCHEDULED` | Nothing: it arrived at 10:28 |
 
 More tests to write:
 
@@ -889,9 +994,9 @@ More tests to write:
 - **Out-of-order actual times:** an actual departure earlier than the actual arrival is raised;
   the vehicle never goes back.
 - **Cancelled stop:** a stop on `SCHEDULED`, passed on `ACTUAL`.
-- **Cancelled trip / extra trip:** `NOT_RUNNING` on the basis where it doesn't exist.
+- **Cancelled trip / extra trip:** no movements on the basis where it doesn't exist.
 - **Leg through passed stations:** its path joins all the hops; distance 0.5 is half the total.
-- **0-second leg:** `timeFraction` is 1; `AT_STATION` at the later stop.
+- **0-second leg:** `timeFraction` is 1; not in the movements (nothing to animate).
 - **No path:** straight line between the stations, `estimated`.
 - **Invalid trips:** fewer than 2 events, decreasing sequence, scheduled time going backwards,
   or a `nextSegment` that doesn't connect the stations each throw `IllegalArgumentException`.
@@ -909,115 +1014,83 @@ The model exposes no endpoints itself. The endpoints live in the **controller** 
 HTTP request → controller → service → model objects (via repositories) → result → DTO → JSON
 ```
 
+### Version 1: four endpoints
+
+| Endpoint | Returns | The frontend calls it | Domain used |
+|---|---|---|---|
+| `GET /days` | The service dates in the database | once, at start | `TripRepository.serviceDates` |
+| `GET /stations` | **Every** station: id, name, location | once, at start; cached | `StationRepository.findAll` |
+| `GET /movements?date=…&from=08:00&to=08:30` | Every leg moving at some point in the window (at most 3 hours), ordered by departure, on actual times | once per window | `TripRepository.findCandidatesRunningBetween`, `VehicleFactory`, `Vehicle.movementsBetween` |
+| `GET /paths?ids=1,2` | The geometry of those paths, in the order asked | for ids it doesn't have yet; cached | `PathSegment`, `Polyline` |
+
+```json
+GET /stations
+[{ "id": "8503000", "name": "Zürich HB",
+   "location": { "longitude": 8.5402, "latitude": 47.3782, "heightM": 408.0 } }, …]
+
+GET /movements?date=2026-10-21&from=09:30&to=10:30
+[{ "trip": { "date": "2026-10-21", "id": "85:11:712:001" },
+   "displayName": "IC 712",
+   "vehicleType": "TRAIN",
+   "pathIds": [1, 2],
+   "fromStation": { "id": "8503000", "name": "Zürich HB" },
+   "toStation": { "id": "8507000", "name": "Bern" },
+   "departS": 34390,
+   "arriveS": 37840,
+   "motion": "SMOOTH",
+   "delayS": 70,
+   "estimated": true }]
+
+GET /paths?ids=1,2
+[{ "id": 1, "fromStation": "8503000", "toStation": "8502113", "network": "TRACK",
+   "estimated": true, "hasTunnel": false,
+   "coordinates": [[8.5402, 47.3782, 408.0], [8.051, 47.3913, 383.0]] }, …]
+```
+
+How the frontend turns these four answers into moving vehicles, and why movements carry ids
+rather than coordinates, is section 7.
+
 ### Conventions
 
 | Topic | Rule |
 |---|---|
 | Base path | `/api/v1/` |
 | Date | Service date, ISO: `date=2026-10-21` |
-| Time | Wall-clock service time `HH:MM` or `HH:MM:SS`: `time=09:32`; `25:10` is valid (`ServiceDay.parseClock`) |
-| Basis | `basis=actual` (default) or `basis=scheduled` |
+| Time | Wall-clock service time `HH:MM` or `HH:MM:SS`: `from=09:32`; `25:10` is valid (`ServiceDay.parseClock`) |
 | Seconds in responses | Fields ending in `S` (`departS`) are service-time seconds (elapsed since the service day's start) |
 | Delays | `delayS`, integer seconds, negative when early |
-| Vehicle type filter | `type=TRAIN`, repeatable |
-| Stations inside answers | `{ "id": "8503000", "name": "Zürich HB" }` |
-| Times in answers | `…S` seconds plus wall-clock text, e.g. `"scheduledS": 34320, "scheduled": "09:32"` |
+| Stations inside answers | `{ "id": "8503000", "name": "Zürich HB" }`; the location is in `/stations` |
 | Missing values | `null`, matching `Optional.empty()` |
+| Compression | gzip for responses over 2 KB when the client accepts it |
 | Description | OpenAPI at `/v3/api-docs`; Swagger UI at `/swagger-ui.html` |
-
-### Reference data
-
-| Endpoint | Returns | Domain used |
-|---|---|---|
-| `GET /days` | Service dates in the database | `TripRepository.serviceDates` |
-| `GET /stations?name=Zürich` | Matching stations | `StationRepository.findByName` |
-| `GET /stations/{id}` | One station | `Station` |
-| `GET /lines?name=IC1` | Matching lines (one per operator) | `Line` |
-| `GET /paths?ids=109,116,…` | Path geometries, for the frontend to cache | `PathSegment`, `Polyline` |
-
-### Timetable
-
-| Endpoint | Returns | Domain used |
-|---|---|---|
-| `GET /trips/{date}/{tripId}` | One trip, every stop event with planned and actual times | `Trip`, `StopEvent`, `EventTime` |
-| `GET /stations/{id}/departures?date=…&from=08:00&to=08:10&basis=…` | Departure board with delays and cancellations | `Departure` |
-| `GET /stations/stats?date=…` | Per-station punctuality for the map | `StationDayStats` |
-
-`tripId` contains colons; clients URL-encode it.
-
-### Vehicles
-
-| Endpoint | Returns | Domain used |
-|---|---|---|
-| `GET /vehicles?date=…&time=10:00&basis=actual&type=TRAIN` | Every running vehicle's position | `TripRepository.findCandidatesRunningBetween`, `VehicleFactory`, `Vehicle.positionAt` |
-| `GET /trips/{date}/{tripId}/position?time=10:00&basis=…` | One vehicle's position | `Vehicle.positionAt` |
-
-```json
-{
-  "trip": { "date": "2026-10-21", "id": "85:11:712:001" },
-  "displayName": "IC 712",
-  "destination": { "id": "8507000", "name": "Bern" },
-  "vehicleType": "TRAIN",
-  "basis": "ACTUAL",
-  "status": "MOVING",
-  "location": { "longitude": 7.9, "latitude": 47.2, "heightM": 450 },
-  "station": null,
-  "previousStation": { "id": "8503000", "name": "Zürich HB" },
-  "nextStation": { "id": "8507000", "name": "Bern" },
-  "legProgress": 0.5,
-  "delayS": 70,
-  "timeReliable": true,
-  "estimated": true,
-  "underground": "SURFACE"
-}
-```
-
-### Animation
-
-| Endpoint | Returns | Domain used |
-|---|---|---|
-| `GET /movements?date=…&from=08:00&to=08:30&basis=actual&type=TRAIN` | Every leg moving at some point in the window (at most 3 hours), ordered by departure | `Vehicle.movementsBetween`, `Movement` |
-
-```json
-{
-  "trip": { "date": "2026-10-21", "id": "85:11:712:001" },
-  "displayName": "IC 712",
-  "vehicleType": "TRAIN",
-  "pathIds": [1, 2],
-  "fromStation": { "id": "8503000", "name": "Zürich HB" },
-  "toStation": { "id": "8507000", "name": "Bern" },
-  "departS": 34390,
-  "arriveS": 37840,
-  "motion": "SMOOTH",
-  "delayS": 70,
-  "estimated": true
-}
-```
-
-`pathIds` lists the segments in order (several when the leg passes stations). An empty list
-means no path: the frontend draws a straight line between `fromStation` and `toStation`.
-
-**Why `/movements` as well as `/vehicles`.** On the projector a day lasts about 3 minutes, so
-thousands of vehicles move every real second. `/movements` describes each leg once; the frontend
-moves the vehicles by itself, fetching the paths once with `/paths?ids=…`.
 
 ### Errors
 
 | Case | Response |
 |---|---|
-| Unknown station, trip or path | `404 Not Found` |
-| Bad date, time or basis | `400 Bad Request`, saying what was wrong |
-| `from` after `to`, a `/movements` window over 3 hours, a blank `name` | `400 Bad Request` |
-| A date not in the database | `404 Not Found`, with the available dates |
+| A date not in the database | `404 Not Found`, with `availableDates` |
+| A bad date or time, a missing parameter | `400 Bad Request`, saying what was wrong |
+| `from` after `to`, a window over 3 hours | `400 Bad Request` |
+| Unknown path ids | Left out of the answer |
 
 Map files (street tiles, terrain, relief) never go through these endpoints.
+
+### Later versions (designed, not built)
+
+| Version | Endpoint or parameter | Returns |
+|---|---|---|
+| 2 | `basis=actual\|scheduled`, `type=TRAIN` (repeatable) on `/movements` | The timetable view; a filter by vehicle kind |
+| 3 | `GET /trips/{date}/{tripId}` | One trip, every stop event with planned and actual times (`tripId` contains colons; clients URL-encode it) |
+| 4 | `GET /stations/{id}/departures?date=…&from=…&to=…` | Departure board with delays and cancellations (`Departure`) |
+| 5 | `GET /stations/stats?date=…` | Per-station punctuality (`StationDayStats`) |
+| later | `GET /vehicles?date=…&time=…` | Every vehicle's position at one moment (`Vehicle.positionAt`, `VehiclePosition`), e.g. for spectator mode |
 
 ---
 
 ## 12. Next document
 
-- Application services: `VehicleTrackingService`, `DepartureBoardService`, `TripService`,
-  `StationStatsService`.
+- Application services for later versions: `TripService` (3), `DepartureBoardService` (4),
+  `StationStatsService` (5).
 - The full repository interfaces and their SQL.
 - Paging and limits.
 - The show clock: playing service time 04:00 → 28:00.
