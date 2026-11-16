@@ -4,23 +4,22 @@ import ch.usi.smb_backend.model.network.PathSegment;
 import ch.usi.smb_backend.model.network.VehicleType;
 import ch.usi.smb_backend.model.time.Delay;
 import ch.usi.smb_backend.model.timetable.Leg;
-import ch.usi.smb_backend.model.timetable.Trip;
 import ch.usi.smb_backend.model.vehicle.MotionProfile;
 import ch.usi.smb_backend.model.vehicle.Movement;
 import java.util.List;
 
 /**
- * One leg to animate. The frontend fetches the paths once ({@code /paths?ids=...}) and moves the
- * vehicle along them from {@code departS} to {@code arriveS} with the named motion curve. An empty
- * {@code pathIds} means a straight line between the two stations.
+ * One leg to animate, ids only: stations come from {@code /stations}, paths from {@code /paths},
+ * and the trip's details from {@code /trips/{date}/{tripId}}, all fetched on demand. The service
+ * date is the one asked for. The vehicle moves from {@code departS} to {@code arriveS} with the
+ * named motion curve; an empty {@code pathIds} means a straight line between the two stations.
  */
 public record MovementDto(
-		TripRefDto trip,
-		String displayName,
+		String tripId,
 		VehicleType vehicleType,
 		List<Integer> pathIds,
-		StationRefDto fromStation,
-		StationRefDto toStation,
+		String fromStationId,
+		String toStationId,
 		int departS,
 		int arriveS,
 		MotionProfile motion,
@@ -28,15 +27,13 @@ public record MovementDto(
 		boolean estimated) {
 
 	public static MovementDto from(Movement movement) {
-		Trip trip = movement.vehicle().trip();
 		Leg leg = movement.leg();
 		return new MovementDto(
-				TripRefDto.from(trip.key()),
-				trip.displayName(),
-				trip.line().vehicleType(),
+				movement.vehicle().trip().key().tripId(),
+				movement.vehicle().trip().line().vehicleType(),
 				leg.segments().stream().map(PathSegment::id).toList(),
-				StationRefDto.from(leg.from().station()),
-				StationRefDto.from(leg.to().station()),
+				leg.from().station().id().code(),
+				leg.to().station().id().code(),
 				leg.from().departure().seconds(),
 				leg.to().arrival().seconds(),
 				movement.motionProfile(),

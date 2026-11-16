@@ -23,6 +23,10 @@ record ReferenceData(
 		segments = Map.copyOf(segments);
 	}
 
+	Optional<Station> findStation(StationId id) {
+		return Optional.ofNullable(stations.get(id));
+	}
+
 	Optional<PathSegment> findSegment(int id) {
 		return Optional.ofNullable(segments.get(id));
 	}

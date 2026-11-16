@@ -4,7 +4,9 @@ import ch.usi.smb_backend.model.port.TripRepository;
 import ch.usi.smb_backend.model.time.ServiceDay;
 import ch.usi.smb_backend.model.time.ServiceTime;
 import ch.usi.smb_backend.model.timetable.Trip;
+import ch.usi.smb_backend.model.timetable.TripKey;
 import ch.usi.smb_backend.repository.entity.TripEntity;
+import ch.usi.smb_backend.repository.entity.TripEntityId;
 import ch.usi.smb_backend.repository.entity.TripEntityRepository;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -58,12 +60,23 @@ class JpaTripRepository implements TripRepository {
 		return validTrips(rows);
 	}
 
+	@Override
+	public Optional<Trip> findByKey(TripKey key) {
+		return tripRows.findWithStopEvents(new TripEntityId(key.serviceDate(), key.tripId()))
+				.flatMap(row -> mapOrSkip(row, reference.get()));
+	}
+
+	@Override
+	public List<Trip> findByNumber(ServiceDay day, String number) {
+		return validTrips(tripRows.findByNumber(day.date(), number));
+	}
+
 	private static OffsetDateTime timestamp(ServiceDay day, ServiceTime time) {
 		return day.toInstant(time).atOffset(ZoneOffset.UTC);
 	}
 
 	/**
-	 * Rows that break a model rule are left out and logged, so one bad trip can't hide a whole
+	 * Rows that break a model rule, or point at an unknown station, line or path, are left out and logged, so one bad trip can't hide a whole
 	 * window; they are reported to the data group, never fixed here.
 	 */
 	private List<Trip> validTrips(List<TripEntity> rows) {
@@ -76,7 +89,8 @@ class JpaTripRepository implements TripRepository {
 	private static Optional<Trip> mapOrSkip(TripEntity row, ReferenceData data) {
 		try {
 			return Optional.of(TripMapper.toTrip(row, data));
-		} catch (IllegalArgumentException invalid) {
+		} catch (IllegalArgumentException | IllegalStateException invalid) {
+			// IllegalState: the row points at a station, line or path we don't have.
 			LOG.warn("Skipping an invalid trip in the data: {}", invalid.getMessage());
 			return Optional.empty();
 		}

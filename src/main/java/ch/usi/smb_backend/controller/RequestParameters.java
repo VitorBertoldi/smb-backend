@@ -38,4 +38,14 @@ final class RequestParameters {
 			throw new BadRequestException("the window may be at most " + limit.toHours() + " hours long");
 		}
 	}
+
+	/**
+	 * @throws BadRequestException when the text is blank
+	 */
+	static String requireText(String parameter, String text) {
+		if (text.isBlank()) {
+			throw new BadRequestException("'" + parameter + "' must not be blank");
+		}
+		return text.strip();
+	}
 }

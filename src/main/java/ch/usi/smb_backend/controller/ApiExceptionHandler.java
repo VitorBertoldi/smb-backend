@@ -1,5 +1,6 @@
 package ch.usi.smb_backend.controller;
 
+import ch.usi.smb_backend.service.NotFoundException;
 import ch.usi.smb_backend.service.UnknownServiceDateException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -19,6 +20,11 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
 		problem.setProperty("availableDates", exception.availableDates());
 		return problem;
+	}
+
+	@ExceptionHandler(NotFoundException.class)
+	ProblemDetail notFound(NotFoundException exception) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
 	}
 
 	@ExceptionHandler(BadRequestException.class)

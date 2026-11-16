@@ -9,6 +9,7 @@ import ch.usi.smb_backend.model.network.NetworkType;
 import ch.usi.smb_backend.model.network.PathSegment;
 import ch.usi.smb_backend.model.network.Platform;
 import ch.usi.smb_backend.model.network.Station;
+import ch.usi.smb_backend.model.network.StationId;
 import ch.usi.smb_backend.model.network.VehicleType;
 import ch.usi.smb_backend.model.time.EventTime;
 import ch.usi.smb_backend.model.time.ServiceDay;
@@ -17,6 +18,7 @@ import ch.usi.smb_backend.model.time.TimeStatus;
 import ch.usi.smb_backend.model.timetable.StopEvent;
 import ch.usi.smb_backend.model.timetable.Trip;
 import ch.usi.smb_backend.model.timetable.TripKey;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -50,6 +52,8 @@ class JpaRepositoriesIntegrationTest {
 	private JpaPathSegmentRepository segments;
 	@Autowired
 	private JpaTripRepository trips;
+	@Autowired
+	private EntityManager entityManager;
 
 	@Test
 	void listsEveryStationByIdWithItsLocationAndLevel() {
@@ -60,6 +64,14 @@ class JpaRepositoriesIntegrationTest {
 		assertThat(zurich.location()).isEqualTo(new GeoPoint(8.5402, 47.3782, 408));
 		assertThat(zurich.level()).isEqualTo(Level.UNDERGROUND);
 		assertThat(all.getLast().level()).isEqualTo(Level.UNKNOWN);
+	}
+
+	@Test
+	void findsOneStationAndOnePathById() {
+		assertThat(stations.findById(new StationId("8503000"))).get().extracting(Station::name).isEqualTo("Zürich HB");
+		assertThat(stations.findById(new StationId("0000000"))).isEmpty();
+		assertThat(segments.findById(1)).get().extracting(PathSegment::id).isEqualTo(1);
+		assertThat(segments.findById(99)).isEmpty();
 	}
 
 	@Test
@@ -111,6 +123,40 @@ class JpaRepositoriesIntegrationTest {
 
 		assertThat(DAY.formatClock(night.timeline(TimeBasis.SCHEDULED).lastArrival())).isEqualTo("24:20");
 		assertThat(night.extra()).isTrue();
+	}
+
+	@Test
+	void findsOneTripByKeyWithAllItsStopEvents() {
+		assertThat(trips.findByKey(IC_712)).get().satisfies(trip -> assertThat(trip.stopEvents()).hasSize(3));
+		assertThat(trips.findByKey(new TripKey(WEDNESDAY, "nope"))).isEmpty();
+	}
+
+	@Test
+	void findsTheTripsOfADayByNumber() {
+		assertThat(trips.findByNumber(DAY, "712")).extracting(Trip::key).containsExactly(IC_712);
+		assertThat(trips.findByNumber(DAY, "1")).isEmpty();
+	}
+
+	@Test
+	void leavesOutATripThatPointsAtAnUnknownStationInsteadOfFailing() {
+		// The connection is read-only and the foreign keys would refuse such a row, so both are
+		// switched off for this (rolled back) transaction.
+		entityManager.createNativeQuery("SET LOCAL transaction_read_only = off").executeUpdate();
+		entityManager.createNativeQuery("SET LOCAL session_replication_role = replica").executeUpdate();
+		entityManager.createNativeQuery("""
+				INSERT INTO transport.trips VALUES ('2026-10-21', 'broken', '1', '11:IC1', FALSE, FALSE,
+				    '2026-10-21 10:00:00+02', '2026-10-21 10:30:00+02', 2)""").executeUpdate();
+		entityManager.createNativeQuery("""
+				INSERT INTO transport.stop_events (service_date, trip_id, stop_sequence, station_id,
+				    scheduled_arrival, scheduled_departure, is_stop_cancelled, is_pass_through) VALUES
+				    ('2026-10-21', 'broken', 1, '9999999', NULL, '2026-10-21 10:00:00+02', FALSE, FALSE),
+				    ('2026-10-21', 'broken', 2, '8507000', '2026-10-21 10:30:00+02', NULL, FALSE, FALSE)""")
+				.executeUpdate();
+
+		assertThat(trips.findCandidatesRunningBetween(DAY, DAY.parseClock("10:00"), DAY.parseClock("10:05")))
+				.extracting(Trip::key).contains(IC_712).doesNotContain(new TripKey(WEDNESDAY, "broken"));
+		assertThat(trips.findByKey(new TripKey(WEDNESDAY, "broken"))).isEmpty();
+		assertThat(trips.findByNumber(DAY, "1")).isEmpty();
 	}
 
 	private Trip tripAround(String clock, TripKey key) {

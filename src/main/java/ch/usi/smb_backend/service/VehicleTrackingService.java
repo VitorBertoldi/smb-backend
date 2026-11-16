@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 public class VehicleTrackingService {
 
 	/** Version 1 shows the day as it really ran; the timetable view comes in version 2. */
-	private static final TimeBasis BASIS = TimeBasis.ACTUAL;
+	static final TimeBasis BASIS = TimeBasis.ACTUAL;
 
 	private final TripRepository trips;
 	private final VehicleFactory vehicles;

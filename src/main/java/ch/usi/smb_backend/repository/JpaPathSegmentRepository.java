@@ -25,4 +25,9 @@ class JpaPathSegmentRepository implements PathSegmentRepository {
 				.flatMap(Optional::stream)
 				.toList();
 	}
+
+	@Override
+	public Optional<PathSegment> findById(int id) {
+		return reference.get().findSegment(id);
+	}
 }
