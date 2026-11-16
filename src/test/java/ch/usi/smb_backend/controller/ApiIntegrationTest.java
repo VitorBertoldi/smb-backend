@@ -18,7 +18,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
  * The whole backend, from HTTP to PostgreSQL, on the sample rows of 21 Oct 2026
  * ({@code db/gold-sample-data.sql}): IC 712, a cancelled IC 2512 and an extra night trip.
  */
-@SpringBootTest
+@SpringBootTest(properties = "app.cors.allowed-origins=http://localhost:5173, https://*.domain-fe.example")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class ApiIntegrationTest {
@@ -146,6 +146,42 @@ class ApiIntegrationTest {
 						"/api/v1/days", "/api/v1/stations", "/api/v1/stations/{id}", "/api/v1/movements",
 						"/api/v1/paths", "/api/v1/paths/{id}", "/api/v1/trips", "/api/v1/trips/{date}/{tripId}",
 						"/api/v1/trips/{date}/{tripId}/movements");
+	}
+
+	@Test
+	void letsAnAllowedWebsiteReadTheApi() {
+		assertThat(getFrom("http://localhost:5173", "/api/v1/days")).hasStatusOk()
+				.hasHeader("Access-Control-Allow-Origin", "http://localhost:5173");
+		assertThat(getFrom("https://map.domain-fe.example", "/api/v1/days")).hasStatusOk()
+				.hasHeader("Access-Control-Allow-Origin", "https://map.domain-fe.example");
+	}
+
+	@Test
+	void refusesAWebsiteThatIsNotAllowed() {
+		assertThat(getFrom("https://evil.example", "/api/v1/days")).hasStatus(HttpStatus.FORBIDDEN)
+				.doesNotContainHeader("Access-Control-Allow-Origin");
+	}
+
+	@Test
+	void answersAPreflightForReadingOnly() {
+		MvcTestResult reading = preflight("http://localhost:5173", "GET");
+
+		assertThat(reading).hasStatusOk()
+				.hasHeader("Access-Control-Allow-Origin", "http://localhost:5173")
+				.hasHeader("Access-Control-Max-Age", "3600")
+				.doesNotContainHeader("Access-Control-Allow-Credentials");
+		assertThat(preflight("http://localhost:5173", "DELETE")).hasStatus(HttpStatus.FORBIDDEN);
+	}
+
+	private MvcTestResult getFrom(String origin, String uri) {
+		return mvc.get().uri(uri).header("Origin", origin).exchange();
+	}
+
+	private MvcTestResult preflight(String origin, String method) {
+		return mvc.options().uri("/api/v1/days")
+				.header("Origin", origin)
+				.header("Access-Control-Request-Method", method)
+				.exchange();
 	}
 
 	private MvcTestResult get(String uri) {
