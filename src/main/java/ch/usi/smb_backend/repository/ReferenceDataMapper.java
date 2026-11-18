@@ -36,7 +36,9 @@ final class ReferenceDataMapper {
 				row.getSloid(),
 				row.getName(),
 				new GeoPoint(row.getLongitude(), row.getLatitude(), heightM),
-				toLevel(row.getUnderground()));
+				// stations.is_underground (from OSM) is not in the data group's database yet; read it
+				// again (and map true/false/null to UNDERGROUND/SURFACE/UNKNOWN) once they add it.
+				Level.UNKNOWN);
 	}
 
 	static Line toLine(LineEntity row) {
@@ -59,13 +61,6 @@ final class ReferenceDataMapper {
 				toPolyline(row.getPoints(), from, to),
 				row.isEstimated(),
 				Boolean.TRUE.equals(row.getHasTunnel()));
-	}
-
-	private static Level toLevel(Boolean underground) {
-		if (underground == null) {
-			return Level.UNKNOWN;
-		}
-		return underground ? Level.UNDERGROUND : Level.SURFACE;
 	}
 
 	/** A path with fewer than two points becomes the straight line between its stations. */

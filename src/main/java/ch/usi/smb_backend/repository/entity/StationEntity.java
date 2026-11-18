@@ -25,9 +25,6 @@ public class StationEntity {
 
 	private Float elevation;
 
-	@Column(name = "is_underground")
-	private Boolean underground;
-
 	protected StationEntity() {
 	}
 
@@ -54,10 +51,5 @@ public class StationEntity {
 	/** Metres above sea level; null when the stop register has none. */
 	public Float getElevation() {
 		return elevation;
-	}
-
-	/** Null when no OpenStreetMap stop matched. */
-	public Boolean getUnderground() {
-		return underground;
 	}
 }
