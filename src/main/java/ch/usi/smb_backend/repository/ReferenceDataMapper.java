@@ -40,10 +40,13 @@ final class ReferenceDataMapper {
 	}
 
 	static Line toLine(LineEntity row) {
+		// A few gold rows have no line name or category; fall back instead of failing the whole cache.
+		String name = row.getName() != null ? row.getName() : row.getLineId();
+		String category = row.getCategory() != null ? row.getCategory() : "";
 		return new Line(
 				row.getLineId(),
-				row.getName(),
-				row.getCategory(),
+				name,
+				category,
 				enumValue(VehicleType.class, row.getVehicleType(), "lines.vehicle_type"),
 				new Operator(row.getAgencyCode(), row.getAgencyName()));
 	}
