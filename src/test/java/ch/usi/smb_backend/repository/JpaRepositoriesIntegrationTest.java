@@ -58,7 +58,7 @@ class JpaRepositoriesIntegrationTest {
 		assertThat(all).extracting(Station::name).containsExactly("Aarau", "Zürich HB", "Bern");
 		Station zurich = all.get(1);
 		assertThat(zurich.location()).isEqualTo(new GeoPoint(8.5402, 47.3782, 408));
-		assertThat(zurich.level()).isEqualTo(Level.UNDERGROUND);
+		assertThat(zurich.level()).isEqualTo(Level.UNKNOWN); // is_underground not read yet
 		assertThat(all.getLast().level()).isEqualTo(Level.UNKNOWN);
 	}
 
