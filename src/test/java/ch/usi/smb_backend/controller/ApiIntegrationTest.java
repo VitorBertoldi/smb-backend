@@ -14,7 +14,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
  * The whole backend, from HTTP to PostgreSQL, on the sample rows of 21 Oct 2026
- * ({@code db/gold-sample-data.sql}): IC 712, a cancelled IC 2512 and an extra night trip.
+ * ({@code db/sample-data.sql}): IC 712, a cancelled IC 2512 and an extra night trip.
  */
 @SpringBootTest
 @AutoConfigureMockMvc

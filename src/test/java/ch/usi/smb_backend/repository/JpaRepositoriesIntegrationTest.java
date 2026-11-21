@@ -27,7 +27,7 @@ import org.springframework.context.annotation.Import;
 
 /**
  * The JPA layer against a real PostgreSQL holding the gold schema and a few rows
- * ({@code db/gold-schema.sql}, {@code db/gold-sample-data.sql}). Starting the context also proves
+ * ({@code mock-db/schema.sql}, {@code db/sample-data.sql}). Starting the context also proves
  * that every entity matches the schema ({@code ddl-auto=validate}).
  */
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
@@ -67,7 +67,7 @@ class JpaRepositoriesIntegrationTest {
 		List<PathSegment> found = segments.findByIds(List.of(2, 99, 1));
 
 		assertThat(found).extracting(PathSegment::id).containsExactly(2, 1);
-		assertThat(found.getFirst().network()).isEqualTo(NetworkType.TRACK);
+		assertThat(found.getFirst().network()).isEqualTo(NetworkType.RAIL);
 		assertThat(found.getFirst().geometry().points()).hasSize(2);
 		assertThat(found.getFirst().estimated()).isTrue();
 	}
