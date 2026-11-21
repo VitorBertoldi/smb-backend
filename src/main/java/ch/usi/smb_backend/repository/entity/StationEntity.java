@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import org.hibernate.annotations.Immutable;
 
 @Entity
@@ -24,6 +25,11 @@ public class StationEntity {
 	private double longitude;
 
 	private Float elevation;
+
+	// The gold database does not have stations.is_underground yet, so the level is always
+	// UNKNOWN for now. Put @Column(name = "is_underground") back once the column exists.
+	@Transient
+	private Boolean underground;
 
 	protected StationEntity() {
 	}
@@ -51,5 +57,10 @@ public class StationEntity {
 	/** Metres above sea level; null when the stop register has none. */
 	public Float getElevation() {
 		return elevation;
+	}
+
+	/** Null when no OpenStreetMap stop matched. */
+	public Boolean getUnderground() {
+		return underground;
 	}
 }

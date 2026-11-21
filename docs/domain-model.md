@@ -450,7 +450,7 @@ database stops the start-up with a clear error, so it's noticed at once.
 
 #### `NetworkType` (enum)
 
-What a path segment runs on. Proposed values: `TRACK`, `ROAD`, `WATER`, `ROPE` (to confirm).
+What a path segment runs on. The gold database on Azure (2026-11) uses `RAIL`, `METRO`, `TRAM`, `ROAD` and `WATER`; `TRACK` and `ROPE` are kept from the first schema.
 
 #### `PathSegment` (entity)
 
@@ -1042,7 +1042,7 @@ GET /movements?date=2026-10-21&from=09:30&to=10:30
    "estimated": true }]
 
 GET /paths?ids=1,2
-[{ "id": 1, "fromStation": "8503000", "toStation": "8502113", "network": "TRACK",
+[{ "id": 1, "fromStation": "8503000", "toStation": "8502113", "network": "RAIL",
    "estimated": true, "hasTunnel": false,
    "coordinates": [[8.5402, 47.3782, 408.0], [8.051, 47.3913, 383.0]] }, …]
 ```
@@ -1102,7 +1102,7 @@ Map files (street tiles, terrain, relief) never go through these endpoints.
 | Question | Why the domain needs the answer | Our proposal |
 |---|---|---|
 | Exact values of `lines.vehicle_type` | `VehicleType` must mirror them | The eight in 6.3 |
-| Exact values of `path_segments.network` | `NetworkType` | `TRACK`, `ROAD`, `WATER`, `ROPE` |
+| Exact values of `path_segments.network` | `NetworkType` | `RAIL`, `METRO`, `TRAM`, `ROAD`, `WATER` (gold, 2026-11); `TRACK`, `ROPE` kept |
 | Exact values of the status enum | `TimeStatus` mapping | Istdaten's `REAL`, `GESCHAETZT`, `PROGNOSE`, `UNBEKANNT` |
 | Are `actual_*` null when the status is unknown? | `EventTime` rule | Yes |
 | Are `trips.first_departure` / `last_arrival` scheduled or actual? | `findRunningAt` margin | Earliest and latest of both |

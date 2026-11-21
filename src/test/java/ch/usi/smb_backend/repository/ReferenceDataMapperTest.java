@@ -48,8 +48,8 @@ class ReferenceDataMapperTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = {"RAIL", "TRAM", "METRO", "TRACK"})
-	void readsEveryRailNetworkAsTrack(String network) {
+	@ValueSource(strings = {"RAIL", "METRO", "TRAM", "ROAD", "WATER"})
+	void readsTheNetworkValuesOfTheGoldDatabase(String network) {
 		Station zurich = station("8503000", 8.5402, 47.3782);
 		Station bern = station("8507000", 7.4391, 46.9490);
 		PathSegmentEntity row = BeanUtils.instantiateClass(PathSegmentEntity.class);
@@ -61,7 +61,7 @@ class ReferenceDataMapperTest {
 		PathSegment segment = ReferenceDataMapper.toSegment(
 				row, Map.of(zurich.id(), zurich, bern.id(), bern));
 
-		assertThat(segment.network()).isEqualTo(NetworkType.TRACK);
+		assertThat(segment.network()).isEqualTo(NetworkType.valueOf(network));
 	}
 
 	private static Station station(String id, double longitude, double latitude) {

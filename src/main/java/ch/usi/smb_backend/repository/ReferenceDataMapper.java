@@ -39,9 +39,15 @@ final class ReferenceDataMapper {
 				orElse(row.getSloid(), NO_SLOID),
 				orElse(row.getName(), row.getStationId()),
 				new GeoPoint(row.getLongitude(), row.getLatitude(), heightM),
-				// stations.is_underground (from OSM) is not in the data group's database yet; read it
-				// again (and map true/false/null to UNDERGROUND/SURFACE/UNKNOWN) once they add it.
-				Level.UNKNOWN);
+				toLevel(row.getUnderground()));
+	}
+
+	/** Null until the gold database has stations.is_underground (see StationEntity). */
+	private static Level toLevel(Boolean underground) {
+		if (underground == null) {
+			return Level.UNKNOWN;
+		}
+		return underground ? Level.UNDERGROUND : Level.SURFACE;
 	}
 
 	/**
@@ -70,18 +76,10 @@ final class ReferenceDataMapper {
 				row.getSegmentId(),
 				from,
 				to,
-				toNetworkType(row.getNetwork()),
+				enumValue(NetworkType.class, row.getNetwork(), "path_segments.network"),
 				toPolyline(row.getPoints(), from, to),
 				row.isEstimated(),
 				Boolean.TRUE.equals(row.getHasTunnel()));
-	}
-
-	/** The data group's database splits what the domain calls TRACK into RAIL, TRAM and METRO. */
-	private static NetworkType toNetworkType(String network) {
-		return switch (network) {
-			case "RAIL", "TRAM", "METRO" -> NetworkType.TRACK;
-			case null, default -> enumValue(NetworkType.class, network, "path_segments.network");
-		};
 	}
 
 	/** A path with fewer than two points becomes the straight line between its stations. */
