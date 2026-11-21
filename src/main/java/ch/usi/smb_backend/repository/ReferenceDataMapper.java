@@ -25,6 +25,8 @@ final class ReferenceDataMapper {
 	private static final int LATITUDE = 1;
 	private static final int HEIGHT = 2;
 	private static final int MINIMUM_PATH_POINTS = 2;
+	private static final String UNKNOWN_AGENCY = "unknown";
+	private static final String NO_SLOID = "";
 
 	private ReferenceDataMapper() {
 	}
@@ -33,21 +35,32 @@ final class ReferenceDataMapper {
 		double heightM = row.getElevation() == null ? UNKNOWN_HEIGHT_M : row.getElevation();
 		return new Station(
 				new StationId(row.getStationId()),
-				row.getSloid(),
-				row.getName(),
+				// The data group's stations table allows NULL here too; "" means no SLOID.
+				orElse(row.getSloid(), NO_SLOID),
+				orElse(row.getName(), row.getStationId()),
 				new GeoPoint(row.getLongitude(), row.getLatitude(), heightM),
 				// stations.is_underground (from OSM) is not in the data group's database yet; read it
 				// again (and map true/false/null to UNDERGROUND/SURFACE/UNKNOWN) once they add it.
 				Level.UNKNOWN);
 	}
 
+	/**
+	 * The data group's lines table allows NULL in its text columns. A missing value falls back to
+	 * another one, so one incomplete row does not fail every request that loads the lines.
+	 */
 	static Line toLine(LineEntity row) {
+		String name = orElse(row.getName(), row.getLineId());
+		String agencyCode = orElse(row.getAgencyCode(), UNKNOWN_AGENCY);
 		return new Line(
 				row.getLineId(),
-				row.getName(),
-				row.getCategory(),
+				name,
+				orElse(row.getCategory(), name),
 				enumValue(VehicleType.class, row.getVehicleType(), "lines.vehicle_type"),
-				new Operator(row.getAgencyCode(), row.getAgencyName()));
+				new Operator(agencyCode, orElse(row.getAgencyName(), agencyCode)));
+	}
+
+	private static String orElse(String value, String fallback) {
+		return value == null || value.isBlank() ? fallback : value;
 	}
 
 	static PathSegment toSegment(PathSegmentEntity row, Map<StationId, Station> stations) {
@@ -57,10 +70,18 @@ final class ReferenceDataMapper {
 				row.getSegmentId(),
 				from,
 				to,
-				enumValue(NetworkType.class, row.getNetwork(), "path_segments.network"),
+				toNetworkType(row.getNetwork()),
 				toPolyline(row.getPoints(), from, to),
 				row.isEstimated(),
 				Boolean.TRUE.equals(row.getHasTunnel()));
+	}
+
+	/** The data group's database splits what the domain calls TRACK into RAIL, TRAM and METRO. */
+	private static NetworkType toNetworkType(String network) {
+		return switch (network) {
+			case "RAIL", "TRAM", "METRO" -> NetworkType.TRACK;
+			case null, default -> enumValue(NetworkType.class, network, "path_segments.network");
+		};
 	}
 
 	/** A path with fewer than two points becomes the straight line between its stations. */

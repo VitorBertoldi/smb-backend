@@ -61,14 +61,15 @@ final class TripMapper {
 				known == TimeStatus.UNKNOWN ? TimeStatus.FORECAST : known));
 	}
 
-	private static TimeStatus toTimeStatus(String istdatenStatus) {
-		if (istdatenStatus == null) {
+	/** Accepts the Istdaten names and the English ones the data group's database uses. */
+	private static TimeStatus toTimeStatus(String status) {
+		if (status == null) {
 			return TimeStatus.UNKNOWN;
 		}
-		return switch (istdatenStatus) {
-			case "REAL" -> TimeStatus.MEASURED;
-			case "GESCHAETZT" -> TimeStatus.ESTIMATED;
-			case "PROGNOSE" -> TimeStatus.FORECAST;
+		return switch (status) {
+			case "REAL", "MEASURED" -> TimeStatus.MEASURED;
+			case "GESCHAETZT", "ESTIMATED" -> TimeStatus.ESTIMATED;
+			case "PROGNOSE", "FORECAST" -> TimeStatus.FORECAST;
 			default -> TimeStatus.UNKNOWN;
 		};
 	}
